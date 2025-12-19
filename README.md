@@ -39,3 +39,7 @@ Assignment 12:
 Assignment 13:
 <img width="1440" height="900" alt="Image" src="https://github.com/user-attachments/assets/acae0c13-3469-44c6-a03c-f8c67336be54" />
 
+
+Assignment 14:
+![Image](https://github.com/user-attachments/assets/2fc433fc-a8ae-4679-87f2-ed6c99650737)
+
