@@ -1,76 +1,59 @@
-// udp_server.c – Continuous UDP Scientific Calculator Server
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
+#include <math.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <math.h>
-#include <ctype.h>
 
-void trim(char *s) {
-    int i, j = 0;
-    char temp[256];
-    for (i = 0; s[i]; i++)
-        if (!isspace(s[i])) temp[j++] = s[i];
-    temp[j] = '\0';
-    strcpy(s, temp);
-}
+#define PORT 8080
+#define BUF_SIZE 1024
 
-double evaluate(char *expr) {
-    double a, b;
-
-    if (strncmp(expr, "sin(", 4) == 0) { sscanf(expr, "sin(%lf)", &a); return sin(a*M_PI/180); }
-    if (strncmp(expr, "cos(", 4) == 0) { sscanf(expr, "cos(%lf)", &a); return cos(a*M_PI/180); }
-    if (strncmp(expr, "tan(", 4) == 0) { sscanf(expr, "tan(%lf)", &a); return tan(a*M_PI/180); }
-    if (strncmp(expr, "sqrt(", 5) == 0){ sscanf(expr, "sqrt(%lf)", &a); return sqrt(a); }
-    if (strncmp(expr, "inv(", 4) == 0) { sscanf(expr, "inv(%lf)", &a); return 1.0/a; }
-
-    if (sscanf(expr, "%lf+%lf", &a, &b) == 2) return a + b;
-    if (sscanf(expr, "%lf-%lf", &a, &b) == 2) return a - b;
-    if (sscanf(expr, "%lf*%lf", &a, &b) == 2) return a * b;
-    if (sscanf(expr, "%lf/%lf", &a, &b) == 2) return a / b;
-
-    return 0;
+double calculate(char *op, double x, double y) {
+    if (strcmp(op, "sin") == 0) return sin(x);
+    if (strcmp(op, "cos") == 0) return cos(x);
+    if (strcmp(op, "tan") == 0) return tan(x);
+    if (strcmp(op, "inv") == 0) return 1.0 / x;
+    if (strcmp(op, "+") == 0) return x + y;
+    if (strcmp(op, "-") == 0) return x - y;
+    if (strcmp(op, "*") == 0) return x * y;
+    if (strcmp(op, "/") == 0) return y != 0 ? x / y : NAN;
+    return NAN;
 }
 
 int main() {
     int sockfd;
-    char buffer[256];
-    struct sockaddr_in serv, cli;
-    socklen_t len = sizeof(cli);
+    char buffer[BUF_SIZE];
+    struct sockaddr_in servaddr, cliaddr;
+    socklen_t len = sizeof(cliaddr);
 
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 
-    serv.sin_family = AF_INET;
-    serv.sin_addr.s_addr = INADDR_ANY;
-    serv.sin_port = htons(6000);
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = INADDR_ANY;
+    servaddr.sin_port = htons(PORT);
 
-    bind(sockfd, (struct sockaddr*)&serv, sizeof(serv));
+    bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr));
 
-    printf("UDP Scientific Calculator Server running on port 6000...\n");
+    printf("UDP Scientific Calculator Server running...\n");
 
     while (1) {
-        memset(buffer, 0, sizeof(buffer));
+        int seq;
+        char op[10];
+        double x, y;
 
-        recvfrom(sockfd, buffer, sizeof(buffer), 0,
-                (struct sockaddr*)&cli, &len);
+        recvfrom(sockfd, buffer, BUF_SIZE, 0,
+                 (struct sockaddr *)&cliaddr, &len);
 
-        trim(buffer);
+        sscanf(buffer, "%d %s %lf %lf", &seq, op, &x, &y);
 
-        printf("\n Received expression: %s\n", buffer);
+        double result = calculate(op, x, y);
 
-        double ans = evaluate(buffer);
+        snprintf(buffer, BUF_SIZE, "%d %.6f", seq, result);
 
-        char reply[100];
-        sprintf(reply, "%lf", ans);
-
-        printf("Sending result to client: %s\n", reply);
-
-        sendto(sockfd, reply, strlen(reply), 0,
-               (struct sockaddr*)&cli, len);
+        sendto(sockfd, buffer, strlen(buffer), 0,
+               (struct sockaddr *)&cliaddr, len);
     }
 
     close(sockfd);
     return 0;
 }
-
