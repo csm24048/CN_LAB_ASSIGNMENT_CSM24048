@@ -1,47 +1,49 @@
-"""
-leaf_spine.py – Custom Leaf-Spine Topology for Assignment 14
-"""
-
 from mininet.topo import Topo
 from mininet.net import Mininet
+from mininet.node import OVSController
 from mininet.cli import CLI
 from mininet.log import setLogLevel
 
-class LeafSpine(Topo):
 
-    def build(self, spine_radix=2, leaf_radix=2, hosts_per_leaf=2):
+class LeafSpineTopo(Topo):
+    def __init__(self, k=4):
         """
-        spine_radix = number of spine switches
-        leaf_radix  = number of leaf switches
-        hosts_per_leaf = number of hosts per leaf switch
+        k = switch radix (must be even)
         """
+        super().__init__()
+
+        if k % 2 != 0:
+            raise Exception("Radix k must be even")
+
+        num_spines = k // 2
+        num_leaves = k
+        hosts_per_leaf = k // 2
 
         # Create spine switches
         spines = []
-        for i in range(spine_radix):
-            s = self.addSwitch(f'spine{i+1}')
-            spines.append(s)
+        for i in range(num_spines):
+            spine = self.addSwitch(f's{i+1}')
+            spines.append(spine)
 
-        # Create leaf switches and connect to spine switches
-        for l in range(leaf_radix):
-            leaf = self.addSwitch(f'leaf{l+1}')
+        # Create leaf switches and hosts
+        for i in range(num_leaves):
+            leaf = self.addSwitch(f'l{i+1}')
 
-            # Full mesh: connect leaf to all spine switches
+            # Connect leaf to all spines
             for spine in spines:
                 self.addLink(leaf, spine)
 
-            # Attach hosts to each leaf switch
+            # Add hosts to leaf
             for h in range(hosts_per_leaf):
-                host = self.addHost(f'h{l+1}{h+1}')
+                host = self.addHost(f'h{i+1}{h+1}')
                 self.addLink(host, leaf)
 
 
-# Make the topology available
 def run():
-    topo = LeafSpine(spine_radix=2, leaf_radix=3, hosts_per_leaf=2)
-    net = Mininet(topo=topo)
+    topo = LeafSpineTopo(k=4)   # change k to scale
+    net = Mininet(topo=topo, controller=OVSController)
     net.start()
-    print("Custom Leaf–Spine Topology Running...")
+    print("Leaf-Spine topology running")
     CLI(net)
     net.stop()
 
