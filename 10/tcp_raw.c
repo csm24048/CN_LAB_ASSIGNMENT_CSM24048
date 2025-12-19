@@ -1,89 +1,76 @@
-// send_tcp_raw.c – RAW TCP packet with custom payload (roll number)
-
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <netinet/tcp.h>
 #include <netinet/ip.h>
+#include <netinet/tcp.h>
 
 #define PCKT_LEN 8192
 
-unsigned short csum(unsigned short *ptr, int nbytes) {
+/* Checksum function */
+unsigned short checksum(unsigned short *ptr, int nbytes) {
     long sum = 0;
     while (nbytes > 1) {
         sum += *ptr++;
         nbytes -= 2;
     }
     if (nbytes == 1)
-        sum += *(unsigned char*)ptr;
-
+        sum += *(unsigned char *)ptr;
     sum = (sum >> 16) + (sum & 0xffff);
     sum += (sum >> 16);
     return (unsigned short)(~sum);
 }
 
 int main() {
+    int sock;
     char packet[PCKT_LEN];
+    struct iphdr *ip = (struct iphdr *)packet;
+    struct tcphdr *tcp = (struct tcphdr *)(packet + sizeof(struct iphdr));
+    struct sockaddr_in dest;
 
-    // Create raw socket
-    int sock = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
+    char payload[] = "ROLL_NUMBER_12345";   // ← PUT YOUR ROLL NUMBER HERE
+
+    sock = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
     if (sock < 0) {
         perror("Socket error");
-        return -1;
+        return 1;
     }
 
-    // Zero out packet buffer
     memset(packet, 0, PCKT_LEN);
 
-    // Pointers to IP and TCP header
-    struct iphdr *ip = (struct iphdr *) packet;
-    struct tcphdr *tcp = (struct tcphdr *) (packet + sizeof(struct iphdr));
-
-    // Payload = roll number
-    char *payload = packet + sizeof(struct iphdr) + sizeof(struct tcphdr);
-    strcpy(payload, "ROLLNO_23XYZ1234");    // <--- CHANGE THIS TO YOUR ROLL NUMBER
-    int payload_size = strlen(payload);
-
-    // Server address
-    struct sockaddr_in dest;
-    dest.sin_family = AF_INET;
-    dest.sin_port = htons(80);           // arbitrary port
-    inet_pton(AF_INET, "10.0.0.2", &dest.sin_addr); // target = h2
-
-    // IP HEADER
+    /* IP Header */
     ip->ihl = 5;
     ip->version = 4;
-    ip->tos = 0;
-    ip->tot_len = htons(sizeof(struct iphdr) + sizeof(struct tcphdr) + payload_size);
+    ip->tot_len = htons(sizeof(struct iphdr) + sizeof(struct tcphdr) + strlen(payload));
     ip->id = htons(54321);
     ip->ttl = 64;
     ip->protocol = IPPROTO_TCP;
-    ip->saddr = inet_addr("10.0.0.1");    // spoofed source (h1)
-    ip->daddr = dest.sin_addr.s_addr;
-    ip->check = csum((unsigned short*)packet, sizeof(struct iphdr));
+    ip->saddr = inet_addr("192.168.1.10");   // source IP
+    ip->daddr = inet_addr("192.168.1.20");   // destination IP
+    ip->check = checksum((unsigned short *)ip, sizeof(struct iphdr));
 
-    // TCP HEADER
-    tcp->source = htons(12345);
+    /* TCP Header */
+    tcp->source = htons(1234);
     tcp->dest = htons(80);
     tcp->seq = htonl(1);
-    tcp->ack_seq = 0;
     tcp->doff = 5;
     tcp->syn = 1;
-    tcp->window = htons(5840);
+    tcp->window = htons(65535);
 
-    tcp->check = 0; // Kernel will compute
+    /* Copy payload */
+    memcpy(packet + sizeof(struct iphdr) + sizeof(struct tcphdr),
+           payload, strlen(payload));
 
-    // Send the packet
-    if (sendto(sock, packet, ntohs(ip->tot_len), 0,
-               (struct sockaddr*)&dest, sizeof(dest)) < 0) {
-        perror("sendto");
-    } else {
-        printf("RAW TCP packet sent with roll number in payload.\n");
-    }
+    /* Destination */
+    dest.sin_family = AF_INET;
+    dest.sin_addr.s_addr = ip->daddr;
 
+    sendto(sock, packet,
+           sizeof(struct iphdr) + sizeof(struct tcphdr) + strlen(payload),
+           0, (struct sockaddr *)&dest, sizeof(dest));
+
+    printf("Custom TCP packet sent with roll number payload.\n");
     close(sock);
     return 0;
 }
-
