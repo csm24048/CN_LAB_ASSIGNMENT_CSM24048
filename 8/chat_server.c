@@ -1,4 +1,3 @@
-// chat_server.c – Threaded TCP Chat Server with Logging
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,107 +6,98 @@
 #include <arpa/inet.h>
 #include <time.h>
 
-#define MAX_CLIENTS 100
-#define BUFFER_SIZE 1024
+#define PORT 8080
+#define MAX_CLIENTS 10
+#define BUF_SIZE 1024
 
-int clients[MAX_CLIENTS];
-pthread_mutex_t lock;
+int client_sockets[MAX_CLIENTS];
+int client_count = 0;
+pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-FILE *logfile;
-
-// Broadcast message to all clients
-void broadcast_message(char *msg, int sender_fd) {
-    pthread_mutex_lock(&lock);
-    for (int i = 0; i < MAX_CLIENTS; i++) {
-        if (clients[i] != 0 && clients[i] != sender_fd) {
-            send(clients[i], msg, strlen(msg), 0);
+/* Broadcast message to all clients */
+void broadcast(char *message, int sender_fd) {
+    pthread_mutex_lock(&clients_mutex);
+    for (int i = 0; i < client_count; i++) {
+        if (client_sockets[i] != sender_fd) {
+            send(client_sockets[i], message, strlen(message), 0);
         }
     }
-    pthread_mutex_unlock(&lock);
+    pthread_mutex_unlock(&clients_mutex);
 }
 
-// Add timestamp and save message to log.txt
-void save_to_log(char *msg) {
+/* Write chat log with timestamp */
+void write_log(char *message) {
+    pthread_mutex_lock(&file_mutex);
+    FILE *fp = fopen("log.txt", "a");
     time_t now = time(NULL);
-    struct tm *t = localtime(&now);
-    fprintf(logfile, "[%02d:%02d:%02d] %s",
-            t->tm_hour, t->tm_min, t->tm_sec, msg);
-    fflush(logfile);
+    fprintf(fp, "[%s] %s", ctime(&now), message);
+    fclose(fp);
+    pthread_mutex_unlock(&file_mutex);
 }
 
-// Thread function to handle a client
-void *client_handler(void *arg) {
-    int client_fd = *(int*)arg;
-    char buffer[BUFFER_SIZE];
-    int index = -1;
+/* Thread function for each client */
+void *client_handler(void *socket_desc) {
+    int sock = *(int *)socket_desc;
+    char buffer[BUF_SIZE];
+    int read_size;
 
-    // find slot for client
-    for (int i = 0; i < MAX_CLIENTS; i++) {
-        if (clients[i] == 0) {
-            clients[i] = client_fd;
-            index = i;
+    while ((read_size = recv(sock, buffer, BUF_SIZE, 0)) > 0) {
+        buffer[read_size] = '\0';
+
+        write_log(buffer);
+        broadcast(buffer, sock);
+    }
+
+    /* Remove client */
+    pthread_mutex_lock(&clients_mutex);
+    for (int i = 0; i < client_count; i++) {
+        if (client_sockets[i] == sock) {
+            client_sockets[i] = client_sockets[client_count - 1];
+            client_count--;
             break;
         }
     }
+    pthread_mutex_unlock(&clients_mutex);
 
-    while (1) {
-        memset(buffer, 0, sizeof(buffer));
-        int n = recv(client_fd, buffer, sizeof(buffer), 0);
-
-        if (n <= 0) {
-            printf("Client disconnected.\n");
-            pthread_mutex_lock(&lock);
-            clients[index] = 0;
-            pthread_mutex_unlock(&lock);
-            close(client_fd);
-            break;
-        }
-
-        printf("Client %d: %s", client_fd, buffer);
-
-        save_to_log(buffer);      // write to log
-        broadcast_message(buffer, client_fd);  // send to all clients
-    }
-
+    close(sock);
+    free(socket_desc);
     return NULL;
 }
 
 int main() {
-    int server_fd, client_fd;
+    int sockfd, newfd;
     struct sockaddr_in server, client;
-    int c = sizeof(struct sockaddr_in);
+    socklen_t c = sizeof(client);
+    pthread_t thread_id;
 
-    pthread_mutex_init(&lock, NULL);
-
-    logfile = fopen("log.txt", "a");
-    if (!logfile) {
-        perror("Log open failed");
-        return 1;
-    }
-
-    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
     server.sin_family = AF_INET;
     server.sin_addr.s_addr = INADDR_ANY;
-    server.sin_port = htons(7000);
+    server.sin_port = htons(PORT);
 
-    bind(server_fd, (struct sockaddr*)&server, sizeof(server));
-    listen(server_fd, 10);
+    bind(sockfd, (struct sockaddr *)&server, sizeof(server));
+    listen(sockfd, 5);
 
-    printf("Chat Server running on port 7000...\n");
+    printf("Chat Server started on port %d...\n", PORT);
 
-    while ((client_fd = accept(server_fd, (struct sockaddr *)&client, (socklen_t*)&c))) {
-        printf("Client connected. FD = %d\n", client_fd);
+    while ((newfd = accept(sockfd, (struct sockaddr *)&client, &c))) {
+        printf("Accepted new client\n");
 
-        pthread_t thread_id;
-        if (pthread_create(&thread_id, NULL, client_handler, (void*)&client_fd) < 0) {
+        int *new_sock = malloc(sizeof(int));
+        *new_sock = newfd;
+
+        pthread_mutex_lock(&clients_mutex);
+        client_sockets[client_count++] = newfd;
+        pthread_mutex_unlock(&clients_mutex);
+
+        if (pthread_create(&thread_id, NULL, client_handler, (void *)new_sock) < 0) {
             perror("Thread error");
             return 1;
         }
     }
 
-    fclose(logfile);
-    close(server_fd);
+    close(sockfd);
     return 0;
 }
-
