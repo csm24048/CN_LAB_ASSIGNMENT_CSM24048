@@ -1,52 +1,49 @@
-// chat_client.c – Basic TCP Chat Client
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <arpa/inet.h>
 
-#define BUFFER_SIZE 1024
+#define PORT 8080
+#define BUF_SIZE 1024
 
-int sockfd;
+int sock;
 
-// Thread to continuously receive messages from server
+/* Receive messages from server */
 void *receive_handler(void *arg) {
-    char buffer[BUFFER_SIZE];
+    char buffer[BUF_SIZE];
+    int read_size;
 
-    while (1) {
-        memset(buffer, 0, sizeof(buffer));
-        int n = recv(sockfd, buffer, sizeof(buffer), 0);
-        if (n <= 0) break;
-        printf("%s", buffer);
+    while ((read_size = recv(sock, buffer, BUF_SIZE, 0)) > 0) {
+        buffer[read_size] = '\0';
+        printf("\n%s", buffer);
         fflush(stdout);
     }
-
     return NULL;
 }
 
 int main() {
     struct sockaddr_in server;
-    char buffer[BUFFER_SIZE];
+    pthread_t recv_thread;
+    char message[BUF_SIZE];
 
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    sock = socket(AF_INET, SOCK_STREAM, 0);
 
     server.sin_family = AF_INET;
-    server.sin_port = htons(7000);
-    inet_pton(AF_INET, "10.0.0.1", &server.sin_addr);
+    server.sin_port = htons(PORT);
+    server.sin_addr.s_addr = inet_addr("127.0.0.1");
 
-    connect(sockfd, (struct sockaddr*)&server, sizeof(server));
+    connect(sock, (struct sockaddr *)&server, sizeof(server));
 
-    pthread_t recv_thread;
+    printf("Connected to chat server\n");
+
     pthread_create(&recv_thread, NULL, receive_handler, NULL);
 
-    printf("Connected to chat server.\n");
-
-    while (1) {
-        fgets(buffer, BUFFER_SIZE, stdin);
-        send(sockfd, buffer, strlen(buffer), 0);
+    while (fgets(message, BUF_SIZE, stdin)) {
+        send(sock, message, strlen(message), 0);
     }
 
-    close(sockfd);
+    close(sock);
     return 0;
 }
-
