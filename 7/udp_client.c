@@ -1,44 +1,68 @@
-// udp_client.c – Continuous UDP Client Until User Types "exit"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <sys/select.h>
+
+#define PORT 8080
+#define BUF_SIZE 1024
+#define TIMEOUT_SEC 2
 
 int main() {
     int sockfd;
-    char expr[256], result[256];
-
-    struct sockaddr_in serv;
-    socklen_t slen = sizeof(serv);
+    struct sockaddr_in servaddr;
+    char buffer[BUF_SIZE];
+    socklen_t len = sizeof(servaddr);
+    int seq = 1;
 
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 
-    serv.sin_family = AF_INET;
-    serv.sin_port = htons(6000);
-    inet_pton(AF_INET, "10.0.0.1", &serv.sin_addr);
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_port = htons(PORT);
+    servaddr.sin_addr.s_addr = inet_addr("10.0.0.1");  // server IP in Mininet
 
     while (1) {
-        printf("\nEnter expression (or type 'exit' to quit): ");
-        fgets(expr, sizeof(expr), stdin);
-        expr[strcspn(expr, "\n")] = 0;
+        char op[10];
+        double x, y;
 
-        if (strcmp(expr, "exit") == 0) {
-            printf("Client stopped.\n");
-            break;
+        printf("\nOperation (sin cos + - * / inv): ");
+        scanf("%s", op);
+        printf("Operand 1: ");
+        scanf("%lf", &x);
+        printf("Operand 2 (0 if unused): ");
+        scanf("%lf", &y);
+
+        snprintf(buffer, BUF_SIZE, "%d %s %lf %lf", seq, op, x, y);
+        sendto(sockfd, buffer, strlen(buffer), 0,
+               (struct sockaddr *)&servaddr, len);
+
+        fd_set readfds;
+        struct timeval tv;
+        FD_ZERO(&readfds);
+        FD_SET(sockfd, &readfds);
+        tv.tv_sec = TIMEOUT_SEC;
+        tv.tv_usec = 0;
+
+        int rv = select(sockfd + 1, &readfds, NULL, NULL, &tv);
+
+        if (rv == 0) {
+            printf("⚠ Packet loss detected (SEQ %d timeout)\n", seq);
+        } else {
+            recvfrom(sockfd, buffer, BUF_SIZE, 0,
+                     (struct sockaddr *)&servaddr, &len);
+            int rseq;
+            double result;
+            sscanf(buffer, "%d %lf", &rseq, &result);
+
+            if (rseq == seq)
+                printf("Result: %.6f\n", result);
+            else
+                printf("⚠ Out-of-order packet detected\n");
         }
-
-        sendto(sockfd, expr, strlen(expr), 0,
-               (struct sockaddr*)&serv, slen);
-
-        memset(result, 0, sizeof(result));
-
-        recvfrom(sockfd, result, sizeof(result), 0,
-                 (struct sockaddr*)&serv, &slen);
-
-        printf("➡ Result from server: %s\n", result);
+        seq++;
     }
 
     close(sockfd);
     return 0;
 }
-
